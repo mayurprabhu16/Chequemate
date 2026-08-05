@@ -2,9 +2,8 @@ package com.chequemate.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -17,41 +16,33 @@ public class Group {
     private Long id;
 
     private String name;
-
-    private String mode;
+    private String description;
+    private String mode; // Added missing field
 
     @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "created_by_user_id", nullable = false)
-    @JsonIgnoreProperties({"groups", "expenses", "password"})
-    private User createdBy;
+    @JoinColumn(name = "created_by_user_id")
+    private User createdBy; // Added missing field
 
-    @Column(name = "created_at")
-    private LocalDateTime createdAt = LocalDateTime.now();
-
-    @OneToMany(mappedBy = "group", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Expense> expenses = new ArrayList<>();
-
-    @ManyToMany(fetch = FetchType.EAGER)
+    @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
         name = "group_members",
         joinColumns = @JoinColumn(name = "group_id"),
         inverseJoinColumns = @JoinColumn(name = "user_id")
     )
-    @JsonIgnoreProperties({"groups", "expenses", "password"})
-    private Set<User> members = new HashSet<>();
+    private Set<User> members = new HashSet<>(); // Changed from List to Set
 
-    public Group() {
-        this.members = new HashSet<>();
-        this.expenses = new ArrayList<>();
-    }
+    @OneToMany(mappedBy = "group", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnoreProperties("group")
+    private List<Expense> expenses = new ArrayList<>();
 
-    public Group(String name, String mode, User createdBy) {
-        this();
+    public Group() {}
+
+    public Group(String name, String description) {
         this.name = name;
-        this.mode = mode;
-        this.createdBy = createdBy;
+        this.description = description;
     }
 
+    // Getters and Setters
     public Long getId() {
         return id;
     }
@@ -66,6 +57,14 @@ public class Group {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
     }
 
     public String getMode() {
@@ -84,12 +83,12 @@ public class Group {
         this.createdBy = createdBy;
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
+    public Set<User> getMembers() {
+        return members;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
+    public void setMembers(Set<User> members) {
+        this.members = members;
     }
 
     public List<Expense> getExpenses() {
@@ -98,16 +97,5 @@ public class Group {
 
     public void setExpenses(List<Expense> expenses) {
         this.expenses = expenses;
-    }
-
-    public Set<User> getMembers() {
-        if (this.members == null) {
-            this.members = new HashSet<>();
-        }
-        return members;
-    }
-
-    public void setMembers(Set<User> members) {
-        this.members = members;
     }
 }

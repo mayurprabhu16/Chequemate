@@ -11,8 +11,10 @@ import java.util.List;
 @Repository
 public interface GroupRepository extends JpaRepository<Group, Long> {
 
-    @Query(value = "SELECT DISTINCT g.* FROM groups g " +
-                   "JOIN group_members gm ON g.id = gm.group_id " +
-                   "WHERE gm.user_id = :userId", nativeQuery = true)
+    @Query("SELECT DISTINCT g FROM Group g LEFT JOIN FETCH g.members m WHERE m.id = :userId")
+    List<Group> findByUserId(@Param("userId") Long userId);
+
+    // Added missing native query method
+    @Query(value = "SELECT g.* FROM groups g JOIN group_members gm ON g.id = gm.group_id WHERE gm.user_id = :userId", nativeQuery = true)
     List<Group> findGroupsByUserIdNative(@Param("userId") Long userId);
 }
