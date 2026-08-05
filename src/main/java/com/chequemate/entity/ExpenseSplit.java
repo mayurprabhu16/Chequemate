@@ -3,7 +3,6 @@ package com.chequemate.entity;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 
 @Entity
 @Table(name = "expense_splits")
@@ -13,30 +12,37 @@ public class ExpenseSplit {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "expense_id", nullable = false)
-    @JsonIgnoreProperties({"splits", "group", "paidBy"})
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "expense_id")
+    @JsonIgnoreProperties("splits")
     private Expense expense;
 
     @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "user_id", nullable = false)
-    @JsonIgnoreProperties({"groups", "expenses", "password"})
+    @JoinColumn(name = "user_id")
     private User user;
 
-    @Column(name = "amount_owed", precision = 10, scale = 2)
+    private BigDecimal amount;
     private BigDecimal amountOwed;
+    private Double percentage;
 
     public ExpenseSplit() {}
 
-    public ExpenseSplit(Expense expense, User user, BigDecimal amountOwed) {
-        this.expense = expense;
+    // 1. Constructor matching (User, BigDecimal)
+    public ExpenseSplit(User user, BigDecimal amount) {
         this.user = user;
-        this.amountOwed = amountOwed != null ? amountOwed.setScale(2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        this.amount = amount;
+        this.amountOwed = amount;
     }
 
-    public ExpenseSplit(Expense expense, User user, double amountOwed) {
-        this(expense, user, BigDecimal.valueOf(amountOwed));
+    // 2. Constructor matching (Expense, User, BigDecimal)
+    public ExpenseSplit(Expense expense, User user, BigDecimal amount) {
+        this.expense = expense;
+        this.user = user;
+        this.amount = amount;
+        this.amountOwed = amount;
     }
+
+    // --- GETTERS & SETTERS ---
 
     public Long getId() {
         return id;
@@ -62,6 +68,14 @@ public class ExpenseSplit {
         this.user = user;
     }
 
+    public BigDecimal getAmount() {
+        return amount;
+    }
+
+    public void setAmount(BigDecimal amount) {
+        this.amount = amount;
+    }
+
     public BigDecimal getAmountOwed() {
         return amountOwed;
     }
@@ -70,11 +84,11 @@ public class ExpenseSplit {
         this.amountOwed = amountOwed;
     }
 
-    public BigDecimal getAmount() {
-        return amountOwed;
+    public Double getPercentage() {
+        return percentage;
     }
 
-    public void setAmount(BigDecimal amount) {
-        this.amountOwed = amount;
+    public void setPercentage(Double percentage) {
+        this.percentage = percentage;
     }
 }

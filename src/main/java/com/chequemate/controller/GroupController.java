@@ -1,5 +1,21 @@
 package com.chequemate.controller;
 
+import java.util.HashSet;
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Set;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.chequemate.entity.Expense;
 import com.chequemate.entity.ExpenseSplit;
 import com.chequemate.entity.Group;
@@ -7,26 +23,11 @@ import com.chequemate.entity.User;
 import com.chequemate.repository.ExpenseRepository;
 import com.chequemate.repository.GroupRepository;
 import com.chequemate.repository.UserRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.*;
-
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/groups")
 @CrossOrigin(origins = "*")
 public class GroupController {
-
-    private static final Logger logger = LoggerFactory.getLogger(GroupController.class);
 
     @Autowired
     private GroupRepository groupRepository;
@@ -37,181 +38,97 @@ public class GroupController {
     @Autowired
     private ExpenseRepository expenseRepository;
 
-    @GetMapping("/user/{userId}")
-    @Transactional(readOnly = true)
-    public ResponseEntity<List<Group>> getUserGroups(@PathVariable Long userId) {
-        List<Group> groups = groupRepository.findGroupsByUserIdNative(userId);
-        return ResponseEntity.ok(groups);
+    @GetMapping
+    public ResponseEntity<List<Group>> getAllGroups() {
+        return ResponseEntity.ok(groupRepository.findAll());
     }
 
     @GetMapping("/{id}")
-    @Transactional(readOnly = true)
-    public ResponseEntity<?> getGroupById(@PathVariable Long id) {
-        Group group = groupRepository.findById(id).orElse(null);
-        if (group == null) {
-            return ResponseEntity.status(404).body(Map.of("message", "Group not found with id: " + id));
-        }
-        return ResponseEntity.ok(group);
+    public ResponseEntity<Group> getGroupById(@PathVariable Long id) {
+        return groupRepository.findById(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
-    @PostMapping
-    @Transactional
-    public ResponseEntity<?> createGroup(@RequestBody Map<String, Object> payload) {
+    @GetMapping("/user/{userId}")
+    public ResponseEntity<List<Group>> getGroupsByUserId(@PathVariable Long userId) {
+        return ResponseEntity.ok(groupRepository.findByUserId(userId));
+    }
+
+    @PostMapping("/user/{userId}")
+    public ResponseEntity<?> createGroup(@PathVariable Long userId, @RequestBody Group group) {
         try {
-            String name = (String) payload.get("name");
-            String mode = (String) payload.get("mode");
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new NoSuchElementException("User not found with id: " + userId));
 
-            Long creatorId = null;
-            if (payload.get("createdByUserId") != null) {
-                try {
-                    creatorId = Long.valueOf(payload.get("createdByUserId").toString());
-                } catch (NumberFormatException ignored) {}
-            }
+            group.setCreatedBy(user);
+            group.setMode(group.getMode() != null ? group.getMode() : "EQUAL");
 
-            if (creatorId == null) {
-                return ResponseEntity.badRequest().body(Map.of("message", "createdByUserId is required"));
-            }
+            Set<User> members = new HashSet<>();
+            members.add(user);
+            group.setMembers(members);
 
-            User creator = userRepository.findById(creatorId).orElse(null);
-
-            if (creator == null) {
-                List<User> allUsers = userRepository.findAll();
-                if (!allUsers.isEmpty()) {
-                    creator = allUsers.get(allUsers.size() - 1);
-                }
-            }
-
-            if (creator == null) {
-                return ResponseEntity.badRequest().body(Map.of("message", "User not found in database. Please log in again."));
-            }
-
-            Group group = new Group();
-            group.setName(name);
-            group.setMode(mode);
-            group.setCreatedBy(creator);
-
-            Group savedGroup = groupRepository.saveAndFlush(group);
-
-            if (savedGroup.getMembers() == null) {
-                savedGroup.setMembers(new HashSet<>());
-            }
-            savedGroup.getMembers().add(creator);
-
-            Group finalGroup = groupRepository.saveAndFlush(savedGroup);
-
-            return ResponseEntity.ok(finalGroup);
+            Group savedGroup = groupRepository.save(group);
+            return ResponseEntity.status(HttpStatus.CREATED).body(savedGroup);
+        } catch (IllegalArgumentException | NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (Exception e) {
-            logger.error("Failed to create group", e);
-            return ResponseEntity.internalServerError().body(Map.of("message", "Error creating group: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
 
-    @PostMapping("/{groupId}/members")
-    @Transactional
-    public ResponseEntity<?> addMemberToGroup(@PathVariable Long groupId, @RequestBody Map<String, String> payload) {
+    @PostMapping("/{groupId}/members/{userId}")
+    public ResponseEntity<?> addMemberToGroup(@PathVariable Long groupId, @PathVariable Long userId) {
         try {
-            Group group = groupRepository.findById(groupId).orElse(null);
-            if (group == null) {
-                return ResponseEntity.status(404).body(Map.of("message", "Group not found with id: " + groupId));
-            }
+            Group group = groupRepository.findById(groupId)
+                    .orElseThrow(() -> new NoSuchElementException("Group not found with id: " + groupId));
 
-            String searchVal = payload.get("userCode");
-            if (searchVal == null || searchVal.trim().isEmpty()) {
-                searchVal = payload.get("email");
-            }
-
-            if (searchVal == null || searchVal.trim().isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("message", "User email or code is required"));
-            }
-
-            String queryVal = searchVal.trim();
-            Optional<User> userOpt = userRepository.findByUserCode(queryVal);
-
-            if (userOpt.isEmpty()) {
-                userOpt = userRepository.findByEmail(queryVal.toLowerCase());
-            }
-
-            if (userOpt.isEmpty()) {
-                try {
-                    Long parsedId = Long.valueOf(queryVal.replaceAll("[^0-9]", ""));
-                    userOpt = userRepository.findById(parsedId);
-                } catch (Exception ignored) {}
-            }
-
-            if (userOpt.isEmpty()) {
-                return ResponseEntity.status(404).body(Map.of("message", "User '" + queryVal + "' not found"));
-            }
-
-            User newMember = userOpt.get();
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new NoSuchElementException("User not found with id: " + userId));
 
             if (group.getMembers() == null) {
                 group.setMembers(new HashSet<>());
             }
 
-            // Add new member to group
-            group.getMembers().add(newMember);
-            Group updatedGroup = groupRepository.saveAndFlush(group);
+            group.getMembers().add(user);
+            Group updatedGroup = groupRepository.save(group);
 
-            // Dynamically update past equal-split expenses to include the new member
-            List<Expense> expenses = expenseRepository.findByGroupIdOrderByCreatedAtDesc(groupId);
-            int totalMemberCount = updatedGroup.getMembers().size();
+            return ResponseEntity.ok(updatedGroup);
+        } catch (IllegalArgumentException | NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
+    }
 
-            if (totalMemberCount > 0) {
-                for (Expense expense : expenses) {
-                    if ("EQUAL".equalsIgnoreCase(expense.getSplitType())) {
-                        boolean hasMember = expense.getSplits().stream()
-                                .anyMatch(s -> s.getUser().getId().equals(newMember.getId()));
+    @GetMapping("/{groupId}/expenses")
+    public ResponseEntity<List<Expense>> getGroupExpenses(@PathVariable Long groupId) {
+        return ResponseEntity.ok(expenseRepository.findByGroupIdOrderByCreatedAtDesc(groupId));
+    }
 
-                        if (!hasMember) {
-                            BigDecimal newShare = expense.getTotalAmount()
-                                    .divide(BigDecimal.valueOf(totalMemberCount), 2, RoundingMode.HALF_UP);
+    @PostMapping("/{groupId}/expenses")
+    public ResponseEntity<?> createGroupExpense(@PathVariable Long groupId, @RequestBody Expense expense) {
+        try {
+            Group group = groupRepository.findById(groupId)
+                    .orElseThrow(() -> new NoSuchElementException("Group not found with id: " + groupId));
 
-                            // Update existing splits
-                            for (ExpenseSplit split : expense.getSplits()) {
-                                split.setAmountOwed(newShare);
-                            }
+            expense.setGroup(group);
 
-                            // Add split entry for new member
-                            expense.getSplits().add(new ExpenseSplit(expense, newMember, newShare));
-                            expenseRepository.save(expense);
-                        }
+            if (expense.getSplits() != null && !expense.getSplits().isEmpty()) {
+                for (ExpenseSplit split : expense.getSplits()) {
+                    split.setExpense(expense);
+                    if (split.getAmount() != null) {
+                        split.setAmountOwed(split.getAmount());
                     }
                 }
             }
 
-            return ResponseEntity.ok(updatedGroup);
-        } catch (IllegalArgumentException e) {
-            logger.warn("Invalid payload for adding member", e);
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+            Expense savedExpense = expenseRepository.save(expense);
+            return ResponseEntity.status(HttpStatus.CREATED).body(savedExpense);
+        } catch (IllegalArgumentException | NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (Exception e) {
-            logger.error("Failed to add member to group", e);
-            return ResponseEntity.internalServerError().body(Map.of("message", "Failed to add member: " + e.getMessage()));
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
-    }
-
-    @PutMapping("/{id}")
-    @Transactional
-    public ResponseEntity<Group> updateGroup(@PathVariable Long id, @RequestBody Group updatedGroup) {
-        Group group = groupRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Group not found with id: " + id));
-
-        group.setName(updatedGroup.getName());
-        group.setMode(updatedGroup.getMode());
-        Group saved = groupRepository.save(group);
-        return ResponseEntity.ok(saved);
-    }
-
-    @DeleteMapping("/{id}")
-    @Transactional
-    public ResponseEntity<?> deleteGroup(@PathVariable Long id) {
-        Group group = groupRepository.findById(id).orElse(null);
-        if (group == null) {
-            return ResponseEntity.status(404).body(Map.of("message", "Group not found"));
-        }
-
-        group.getMembers().clear();
-        groupRepository.delete(group);
-
-        return ResponseEntity.ok(Map.of("message", "Group deleted successfully"));
     }
 }

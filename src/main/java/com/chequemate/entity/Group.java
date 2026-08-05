@@ -1,9 +1,9 @@
 package com.chequemate.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
-import java.util.HashSet;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -17,11 +17,11 @@ public class Group {
 
     private String name;
     private String description;
-    private String mode; // Added missing field
+    private String mode;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "created_by_user_id")
-    private User createdBy; // Added missing field
+    private User createdBy;
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
@@ -29,10 +29,10 @@ public class Group {
         joinColumns = @JoinColumn(name = "group_id"),
         inverseJoinColumns = @JoinColumn(name = "user_id")
     )
-    private Set<User> members = new HashSet<>(); // Changed from List to Set
+    private Set<User> members = new HashSet<>();
 
     @OneToMany(mappedBy = "group", cascade = CascadeType.ALL, orphanRemoval = true)
-    @JsonIgnoreProperties("group")
+    @JsonIgnore
     private List<Expense> expenses = new ArrayList<>();
 
     public Group() {}
@@ -42,7 +42,8 @@ public class Group {
         this.description = description;
     }
 
-    // Getters and Setters
+    // --- GETTERS & SETTERS ---
+
     public Long getId() {
         return id;
     }

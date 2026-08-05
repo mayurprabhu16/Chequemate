@@ -16,32 +16,36 @@ public class Expense {
     private Long id;
 
     private String description;
-
-    @Column(name = "total_amount", precision = 10, scale = 2)
+    private Double amount;
     private BigDecimal totalAmount;
-
-    @Column(name = "split_type")
     private String splitType;
 
-    @Column(name = "created_at")
-    private LocalDateTime createdAt = LocalDateTime.now();
-
     @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "group_id", nullable = false)
-    @JsonIgnoreProperties({"expenses", "members", "createdBy"})
-    private Group group;
-
-    @ManyToOne(fetch = FetchType.EAGER)
-    @JoinColumn(name = "paid_by_user_id", nullable = false)
-    @JsonIgnoreProperties({"groups", "expenses", "password"})
+    @JoinColumn(name = "paid_by_user_id")
     private User paidBy;
 
-    @OneToMany(mappedBy = "expense", cascade = CascadeType.ALL, orphanRemoval = true)
-    @JsonIgnoreProperties({"expense"})
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "group_id")
+    @JsonIgnoreProperties("expenses")
+    private Group group;
+
+    private LocalDateTime createdAt;
+
+    // --- FIX: Change List<String> to List<ExpenseSplit> ---
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
+    @JoinColumn(name = "expense_id")
     private List<ExpenseSplit> splits = new ArrayList<>();
 
     public Expense() {}
 
+    @PrePersist
+    protected void onCreate() {
+        if (this.createdAt == null) {
+            this.createdAt = LocalDateTime.now();
+        }
+    }
+
+    // Getters and Setters
     public Long getId() {
         return id;
     }
@@ -56,6 +60,14 @@ public class Expense {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Double getAmount() {
+        return amount;
+    }
+
+    public void setAmount(Double amount) {
+        this.amount = amount;
     }
 
     public BigDecimal getTotalAmount() {
@@ -74,12 +86,12 @@ public class Expense {
         this.splitType = splitType;
     }
 
-    public LocalDateTime getCreatedAt() {
-        return createdAt;
+    public User getPaidBy() {
+        return paidBy;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
-        this.createdAt = createdAt;
+    public void setPaidBy(User paidBy) {
+        this.paidBy = paidBy;
     }
 
     public Group getGroup() {
@@ -90,14 +102,15 @@ public class Expense {
         this.group = group;
     }
 
-    public User getPaidBy() {
-        return paidBy;
+    public LocalDateTime getCreatedAt() {
+        return createdAt;
     }
 
-    public void setPaidBy(User paidBy) {
-        this.paidBy = paidBy;
+    public void setCreatedAt(LocalDateTime createdAt) {
+        this.createdAt = createdAt;
     }
 
+    // --- FIX: Update Getters & Setters to List<ExpenseSplit> ---
     public List<ExpenseSplit> getSplits() {
         return splits;
     }
