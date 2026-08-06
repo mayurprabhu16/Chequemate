@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -80,6 +81,30 @@ public class GroupController {
             return ResponseEntity.status(HttpStatus.CREATED).body(savedGroup);
         } catch (IllegalArgumentException | NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
+    }
+
+    // FIXES THE 405 METHOD NOT ALLOWED ERROR FOR EDITING GROUPS
+    @PutMapping("/{id}")
+    @Transactional
+    public ResponseEntity<?> updateGroup(@PathVariable Long id, @RequestBody Map<String, Object> payload) {
+        try {
+            Group group = groupRepository.findById(id)
+                    .orElseThrow(() -> new NoSuchElementException("Group not found with id: " + id));
+
+            if (payload.containsKey("name") && payload.get("name") != null) {
+                group.setName(String.valueOf(payload.get("name")));
+            }
+            if (payload.containsKey("mode") && payload.get("mode") != null) {
+                group.setMode(String.valueOf(payload.get("mode")));
+            }
+
+            Group updatedGroup = groupRepository.save(group);
+            return ResponseEntity.ok(updatedGroup);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
@@ -151,8 +176,8 @@ public class GroupController {
                 Long paidByUserId = null;
                 Object paidByObj = payload.get("paidBy");
 
-                if (paidByObj instanceof Map) {
-                    Object idVal = ((Map<?, ?>) paidByObj).get("id");
+                if (paidByObj instanceof Map<?, ?> map) {
+                    Object idVal = map.get("id");
                     if (idVal != null) {
                         paidByUserId = Long.valueOf(String.valueOf(idVal));
                     }
@@ -167,12 +192,9 @@ public class GroupController {
             }
 
             List<ExpenseSplit> expenseSplits = new ArrayList<>();
-            if (payload.containsKey("splits") && payload.get("splits") instanceof List) {
-                List<?> splitsList = (List<?>) payload.get("splits");
-
+            if (payload.containsKey("splits") && payload.get("splits") instanceof List<?> splitsList) {
                 for (Object splitObj : splitsList) {
-                    if (splitObj instanceof Map) {
-                        Map<?, ?> splitMap = (Map<?, ?>) splitObj;
+                    if (splitObj instanceof Map<?, ?> splitMap) {
                         ExpenseSplit split = new ExpenseSplit();
                         split.setExpense(expense);
 
@@ -181,8 +203,8 @@ public class GroupController {
                             splitUserId = Long.valueOf(String.valueOf(splitMap.get("userId")));
                         } else if (splitMap.containsKey("user") && splitMap.get("user") != null) {
                             Object uObj = splitMap.get("user");
-                            if (uObj instanceof Map) {
-                                Object uId = ((Map<?, ?>) uObj).get("id");
+                            if (uObj instanceof Map<?, ?> uMap) {
+                                Object uId = uMap.get("id");
                                 if (uId != null) splitUserId = Long.valueOf(String.valueOf(uId));
                             } else {
                                 splitUserId = Long.valueOf(String.valueOf(uObj));
@@ -269,10 +291,5 @@ public class GroupController {
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
-    }
-
-    @Override
-    public String toString() {
-        return "GroupController{}";
     }
 }
