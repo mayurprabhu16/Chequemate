@@ -68,6 +68,55 @@ public class GroupController {
         return ResponseEntity.ok(groupRepository.findByUserId(userId));
     }
 
+    @PostMapping
+    public ResponseEntity<?> createGroupFromPayload(@RequestBody Map<String, Object> payload) {
+        try {
+            Long userId = null;
+
+            if (payload.containsKey("userId") && payload.get("userId") != null) {
+                userId = Long.valueOf(String.valueOf(payload.get("userId")));
+            } else if (payload.containsKey("createdBy") && payload.get("createdBy") != null) {
+                Object createdByObj = payload.get("createdBy");
+                if (createdByObj instanceof Map<?, ?> map && map.get("id") != null) {
+                    userId = Long.valueOf(String.valueOf(map.get("id")));
+                } else {
+                    userId = Long.valueOf(String.valueOf(createdByObj));
+                }
+            }
+
+            if (userId == null) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body("User ID or createdBy is required to create a group.");
+            }
+
+            Optional<User> userOpt = userRepository.findById(userId);
+            if (userOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body("User not found with id: " + userId);
+            }
+            User user = userOpt.get();
+
+            Group group = new Group();
+            group.setName(payload.get("name") != null ? String.valueOf(payload.get("name")) : "New Group");
+            group.setMode(payload.get("mode") != null ? String.valueOf(payload.get("mode")) : "EQUAL");
+            group.setCreatedBy(user);
+
+            Set<User> members = new HashSet<>();
+            members.add(user);
+            group.setMembers(members);
+
+            Group savedGroup = groupRepository.save(group);
+            return ResponseEntity.status(HttpStatus.CREATED).body(savedGroup);
+        } catch (IllegalArgumentException | NoSuchElementException | ClassCastException e) {
+            System.err.println("Invalid payload for createGroup: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid data format: " + e.getMessage());
+        } catch (RuntimeException e) {
+            System.err.println("Error creating group: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error creating group: " + e.getMessage());
+        }
+    }
+
     @PostMapping("/user/{userId}")
     public ResponseEntity<?> createGroup(@PathVariable Long userId, @RequestBody Group group) {
         try {
@@ -122,7 +171,6 @@ public class GroupController {
         }
     }
 
-    // HANDLES DELETE /api/groups/{id}
     @DeleteMapping("/{id}")
     @Transactional
     public ResponseEntity<?> deleteGroup(@PathVariable Long id) {
@@ -139,7 +187,7 @@ public class GroupController {
 
             groupRepository.deleteById(id);
             return ResponseEntity.ok("Group deleted successfully");
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             System.err.println("Error deleting group " + id + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Error deleting group: " + e.getMessage());
@@ -347,7 +395,7 @@ public class GroupController {
             }
             expenseRepository.deleteById(expenseId);
             return ResponseEntity.ok("Expense deleted successfully");
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             System.err.println("Error deleting expense " + expenseId + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error deleting expense: " + e.getMessage());
         }
@@ -449,7 +497,7 @@ public class GroupController {
                 simplifiedDebts.add(debt);
 
                 if (debtorOwes.compareTo(settledAmount) > 0) {
-                    debtors.add(new AbstractMap.SimpleEntry<>(debtor.getKey(), settledAmount.subtract(settledAmount)));
+                    debtors.add(new AbstractMap.SimpleEntry<>(debtor.getKey(), debtorOwes.subtract(settledAmount).negate()));
                 }
 
                 if (creditorGets.compareTo(settledAmount) > 0) {
