@@ -116,6 +116,47 @@ public class GroupController {
         }
     }
 
+    @PostMapping("/{groupId}/members")
+    public ResponseEntity<?> addMemberByPayload(@PathVariable Long groupId, @RequestBody Map<String, Object> payload) {
+        try {
+            Optional<Group> groupOpt = groupRepository.findById(groupId);
+            if (groupOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Group not found with id: " + groupId);
+            }
+            Group group = groupOpt.get();
+
+            Optional<User> userOpt = Optional.empty();
+
+            if (payload.containsKey("email") && payload.get("email") != null) {
+                String email = String.valueOf(payload.get("email")).trim();
+                userOpt = userRepository.findByEmail(email);
+            } else if (payload.containsKey("userId") && payload.get("userId") != null) {
+                Long userId = Long.valueOf(String.valueOf(payload.get("userId")));
+                userOpt = userRepository.findById(userId);
+            }
+
+            if (userOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
+            }
+
+            User user = userOpt.get();
+            if (group.getMembers() == null) {
+                group.setMembers(new HashSet<>());
+            }
+
+            group.getMembers().add(user);
+            Group updatedGroup = groupRepository.save(group);
+
+            return ResponseEntity.ok(updatedGroup);
+        } catch (IllegalArgumentException | NoSuchElementException | ClassCastException e) {
+            System.err.println("Invalid request format for adding member: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid data format: " + e.getMessage());
+        } catch (RuntimeException e) {
+            System.err.println("Error adding member: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error adding member: " + e.getMessage());
+        }
+    }
+
     @PostMapping("/{groupId}/members/{userId}")
     public ResponseEntity<?> addMemberToGroup(@PathVariable Long groupId, @PathVariable Long userId) {
         try {
@@ -166,11 +207,9 @@ public class GroupController {
             expense.setGroup(group);
             expense.setCreatedAt(LocalDateTime.now());
 
-            // 1. Parse Description
             String description = payload.get("description") != null ? String.valueOf(payload.get("description")) : "Expense";
             expense.setDescription(description);
 
-            // 2. Parse Amount
             BigDecimal amountVal = BigDecimal.ZERO;
             if (payload.get("amount") != null) {
                 amountVal = new BigDecimal(String.valueOf(payload.get("amount")));
@@ -180,11 +219,9 @@ public class GroupController {
             expense.setAmount(amountVal.doubleValue());
             expense.setTotalAmount(amountVal);
 
-            // 3. Parse Split Type
             String splitType = payload.get("splitType") != null ? String.valueOf(payload.get("splitType")) : "EQUAL";
             expense.setSplitType(splitType);
 
-            // 4. Parse PaidBy User safely
             Long paidByUserId = null;
             Object paidByObj = payload.get("paidBy");
             if (paidByObj == null) {
@@ -202,7 +239,6 @@ public class GroupController {
                 userRepository.findById(paidByUserId).ifPresent(expense::setPaidBy);
             }
 
-            // 5. Parse Splits / Member Splits safely
             List<ExpenseSplit> expenseSplits = new ArrayList<>();
             Object splitsObj = payload.get("splits");
             if (splitsObj == null) splitsObj = payload.get("memberSplits");
@@ -248,7 +284,6 @@ public class GroupController {
 
             expense.setSplits(expenseSplits);
 
-            // 6. Save to Database
             Expense savedExpense = expenseRepository.save(expense);
             return ResponseEntity.status(HttpStatus.CREATED).body(savedExpense);
 
