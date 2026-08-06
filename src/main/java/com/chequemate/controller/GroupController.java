@@ -14,7 +14,6 @@ import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -64,11 +63,13 @@ public class GroupController {
     }
 
     @PostMapping("/user/{userId}")
-    @Transactional
     public ResponseEntity<?> createGroup(@PathVariable Long userId, @RequestBody Group group) {
         try {
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new NoSuchElementException("User not found with id: " + userId));
+            Optional<User> userOpt = userRepository.findById(userId);
+            if (userOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("User not found with id: " + userId);
+            }
+            User user = userOpt.get();
 
             group.setCreatedBy(user);
             group.setMode(group.getMode() != null ? group.getMode() : "EQUAL");
@@ -80,19 +81,22 @@ public class GroupController {
             Group savedGroup = groupRepository.save(group);
             return ResponseEntity.status(HttpStatus.CREATED).body(savedGroup);
         } catch (IllegalArgumentException | NoSuchElementException e) {
+            System.err.println("Invalid request during group creation: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (RuntimeException e) {
+            System.err.println("Error creating group: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
 
-    // FIXES THE 405 METHOD NOT ALLOWED ERROR FOR EDITING GROUPS
     @PutMapping("/{id}")
-    @Transactional
     public ResponseEntity<?> updateGroup(@PathVariable Long id, @RequestBody Map<String, Object> payload) {
         try {
-            Group group = groupRepository.findById(id)
-                    .orElseThrow(() -> new NoSuchElementException("Group not found with id: " + id));
+            Optional<Group> groupOpt = groupRepository.findById(id);
+            if (groupOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Group not found with id: " + id);
+            }
+            Group group = groupOpt.get();
 
             if (payload.containsKey("name") && payload.get("name") != null) {
                 group.setName(String.valueOf(payload.get("name")));
@@ -103,22 +107,29 @@ public class GroupController {
 
             Group updatedGroup = groupRepository.save(group);
             return ResponseEntity.ok(updatedGroup);
-        } catch (NoSuchElementException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
+        } catch (IllegalArgumentException | NoSuchElementException e) {
+            System.err.println("Invalid payload for updateGroup: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (RuntimeException e) {
+            System.err.println("Error updating group " + id + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
 
     @PostMapping("/{groupId}/members/{userId}")
-    @Transactional
     public ResponseEntity<?> addMemberToGroup(@PathVariable Long groupId, @PathVariable Long userId) {
         try {
-            Group group = groupRepository.findById(groupId)
-                    .orElseThrow(() -> new NoSuchElementException("Group not found with id: " + groupId));
+            Optional<Group> groupOpt = groupRepository.findById(groupId);
+            if (groupOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Group not found with id: " + groupId);
+            }
+            Group group = groupOpt.get();
 
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new NoSuchElementException("User not found with id: " + userId));
+            Optional<User> userOpt = userRepository.findById(userId);
+            if (userOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("User not found with id: " + userId);
+            }
+            User user = userOpt.get();
 
             if (group.getMembers() == null) {
                 group.setMembers(new HashSet<>());
@@ -129,8 +140,10 @@ public class GroupController {
 
             return ResponseEntity.ok(updatedGroup);
         } catch (IllegalArgumentException | NoSuchElementException e) {
+            System.err.println("Invalid user or group ID: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (RuntimeException e) {
+            System.err.println("Error adding member to group: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
@@ -141,72 +154,73 @@ public class GroupController {
     }
 
     @PostMapping("/{groupId}/expenses")
-    @Transactional
     public ResponseEntity<?> createGroupExpense(@PathVariable Long groupId, @RequestBody Map<String, Object> payload) {
         try {
-            Group group = groupRepository.findById(groupId)
-                    .orElseThrow(() -> new NoSuchElementException("Group not found with id: " + groupId));
+            Optional<Group> groupOpt = groupRepository.findById(groupId);
+            if (groupOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Group not found with id: " + groupId);
+            }
+            Group group = groupOpt.get();
 
             Expense expense = new Expense();
             expense.setGroup(group);
             expense.setCreatedAt(LocalDateTime.now());
 
-            if (payload.containsKey("description") && payload.get("description") != null) {
-                expense.setDescription(String.valueOf(payload.get("description")));
-            } else {
-                expense.setDescription("Expense");
+            // 1. Parse Description
+            String description = payload.get("description") != null ? String.valueOf(payload.get("description")) : "Expense";
+            expense.setDescription(description);
+
+            // 2. Parse Amount
+            BigDecimal amountVal = BigDecimal.ZERO;
+            if (payload.get("amount") != null) {
+                amountVal = new BigDecimal(String.valueOf(payload.get("amount")));
+            } else if (payload.get("totalAmount") != null) {
+                amountVal = new BigDecimal(String.valueOf(payload.get("totalAmount")));
+            }
+            expense.setAmount(amountVal.doubleValue());
+            expense.setTotalAmount(amountVal);
+
+            // 3. Parse Split Type
+            String splitType = payload.get("splitType") != null ? String.valueOf(payload.get("splitType")) : "EQUAL";
+            expense.setSplitType(splitType);
+
+            // 4. Parse PaidBy User safely
+            Long paidByUserId = null;
+            Object paidByObj = payload.get("paidBy");
+            if (paidByObj == null) {
+                paidByObj = payload.get("paidByUserId");
             }
 
-            if (payload.containsKey("amount") && payload.get("amount") != null) {
-                String amtStr = String.valueOf(payload.get("amount"));
-                expense.setAmount(Double.valueOf(amtStr));
-                expense.setTotalAmount(new BigDecimal(amtStr));
-            } else {
-                expense.setAmount(0.0);
-                expense.setTotalAmount(BigDecimal.ZERO);
+            if (paidByObj instanceof Map<?, ?> map) {
+                Object idVal = map.get("id");
+                if (idVal != null) paidByUserId = Long.valueOf(String.valueOf(idVal));
+            } else if (paidByObj != null) {
+                paidByUserId = Long.valueOf(String.valueOf(paidByObj));
             }
 
-            if (payload.containsKey("splitType") && payload.get("splitType") != null) {
-                expense.setSplitType(String.valueOf(payload.get("splitType")));
-            } else {
-                expense.setSplitType("EQUAL");
+            if (paidByUserId != null) {
+                userRepository.findById(paidByUserId).ifPresent(expense::setPaidBy);
             }
 
-            if (payload.containsKey("paidBy") && payload.get("paidBy") != null) {
-                Long paidByUserId = null;
-                Object paidByObj = payload.get("paidBy");
-
-                if (paidByObj instanceof Map<?, ?> map) {
-                    Object idVal = map.get("id");
-                    if (idVal != null) {
-                        paidByUserId = Long.valueOf(String.valueOf(idVal));
-                    }
-                } else {
-                    paidByUserId = Long.valueOf(String.valueOf(paidByObj));
-                }
-
-                if (paidByUserId != null) {
-                    User payer = userRepository.findById(paidByUserId).orElse(null);
-                    expense.setPaidBy(payer);
-                }
-            }
-
+            // 5. Parse Splits / Member Splits safely
             List<ExpenseSplit> expenseSplits = new ArrayList<>();
-            if (payload.containsKey("splits") && payload.get("splits") instanceof List<?> splitsList) {
+            Object splitsObj = payload.get("splits");
+            if (splitsObj == null) splitsObj = payload.get("memberSplits");
+
+            if (splitsObj instanceof List<?> splitsList) {
                 for (Object splitObj : splitsList) {
                     if (splitObj instanceof Map<?, ?> splitMap) {
                         ExpenseSplit split = new ExpenseSplit();
                         split.setExpense(expense);
 
                         Long splitUserId = null;
-                        if (splitMap.containsKey("userId") && splitMap.get("userId") != null) {
+                        if (splitMap.get("userId") != null) {
                             splitUserId = Long.valueOf(String.valueOf(splitMap.get("userId")));
-                        } else if (splitMap.containsKey("user") && splitMap.get("user") != null) {
+                        } else if (splitMap.get("user") != null) {
                             Object uObj = splitMap.get("user");
-                            if (uObj instanceof Map<?, ?> uMap) {
-                                Object uId = uMap.get("id");
-                                if (uId != null) splitUserId = Long.valueOf(String.valueOf(uId));
-                            } else {
+                            if (uObj instanceof Map<?, ?> uMap && uMap.get("id") != null) {
+                                splitUserId = Long.valueOf(String.valueOf(uMap.get("id")));
+                            } else if (uObj != null) {
                                 splitUserId = Long.valueOf(String.valueOf(uObj));
                             }
                         }
@@ -215,37 +229,46 @@ public class GroupController {
                             userRepository.findById(splitUserId).ifPresent(split::setUser);
                         }
 
-                        if (splitMap.containsKey("amount") && splitMap.get("amount") != null) {
-                            BigDecimal splitAmt = new BigDecimal(String.valueOf(splitMap.get("amount")));
-                            split.setAmount(splitAmt);
-                            split.setAmountOwed(splitAmt);
-                        } else {
-                            split.setAmount(BigDecimal.ZERO);
-                            split.setAmountOwed(BigDecimal.ZERO);
+                        BigDecimal splitAmt = BigDecimal.ZERO;
+                        if (splitMap.get("amount") != null) {
+                            splitAmt = new BigDecimal(String.valueOf(splitMap.get("amount")));
+                        } else if (splitMap.get("amountOwed") != null) {
+                            splitAmt = new BigDecimal(String.valueOf(splitMap.get("amountOwed")));
                         }
 
-                        expenseSplits.add(split);
+                        split.setAmount(splitAmt);
+                        split.setAmountOwed(splitAmt);
+
+                        if (split.getUser() != null) {
+                            expenseSplits.add(split);
+                        }
                     }
                 }
             }
+
             expense.setSplits(expenseSplits);
 
+            // 6. Save to Database
             Expense savedExpense = expenseRepository.save(expense);
             return ResponseEntity.status(HttpStatus.CREATED).body(savedExpense);
 
-        } catch (IllegalArgumentException | NoSuchElementException | ClassCastException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        } catch (IllegalArgumentException | ClassCastException e) {
+            System.err.println("Invalid arguments processing expense for group " + groupId + ": " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid request data: " + e.getMessage());
         } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("Error adding expense: " + e.getMessage());
+            System.err.println("Server error processing expense for group " + groupId + ": " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error processing expense: " + e.getMessage());
         }
     }
 
     @GetMapping("/{groupId}/balances")
     public ResponseEntity<?> getGroupBalances(@PathVariable Long groupId) {
         try {
-            Group group = groupRepository.findById(groupId)
-                    .orElseThrow(() -> new NoSuchElementException("Group not found with id: " + groupId));
+            Optional<Group> groupOpt = groupRepository.findById(groupId);
+            if (groupOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Group not found with id: " + groupId);
+            }
+            Group group = groupOpt.get();
 
             List<Expense> expenses = expenseRepository.findByGroupId(groupId);
 
@@ -287,8 +310,10 @@ public class GroupController {
 
             return ResponseEntity.ok(balances);
         } catch (IllegalArgumentException | NoSuchElementException e) {
+            System.err.println("Invalid request fetching balances for group " + groupId + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (RuntimeException e) {
+            System.err.println("Error calculating balances for group " + groupId + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
