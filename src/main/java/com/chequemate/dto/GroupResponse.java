@@ -1,80 +1,107 @@
 package com.chequemate.dto;
 
-import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Set;
 
 import com.chequemate.entity.Group;
 import com.chequemate.entity.User;
 
 public class GroupResponse {
+
     private Long id;
     private String name;
+    private String description;
     private String mode;
-    private Long createdByUserId;
+    private Long createdById;
     private String createdByName;
-    private List<MemberDTO> members;
+    private String createdByEmail;
+    private Set<User> members;
 
     public GroupResponse() {}
 
-    public static class MemberDTO {
-        private Long id;
-        private String name;
-        private String email;
+    public GroupResponse(Group group) {
+        if (group != null) {
+            this.id = group.getId();
+            this.name = group.getName();
+            this.description = group.getDescription();
+            
+            // Safe access for getMode()
+            this.mode = group.getMode() != null ? group.getMode() : "EQUAL";
 
-        public MemberDTO() {}
+            // Safe access for getCreatedBy()
+            User creator = group.getCreatedBy();
+            if (creator != null) {
+                this.createdById = creator.getId();
+                this.createdByName = creator.getName();
+                this.createdByEmail = creator.getEmail();
+            }
 
-        public MemberDTO(User user) {
-            this.id = user.getId();
-            this.name = user.getName();
-            this.email = user.getEmail();
+            this.members = group.getMembers();
         }
-
-        public Long getId() { return id; }
-        public void setId(Long id) { this.id = id; }
-
-        public String getName() { return name; }
-        public void setName(String name) { this.name = name; }
-
-        public String getEmail() { return email; }
-        public void setEmail(String email) { this.email = email; }
     }
 
-    public static GroupResponse fromEntity(Group group) {
-        GroupResponse response = new GroupResponse();
-        response.setId(group.getId());
-        response.setName(group.getName());
-        response.setMode(group.getMode());
+    // --- GETTERS & SETTERS ---
 
-        if (group.getCreatedBy() != null) {
-            response.setCreatedByUserId(group.getCreatedBy().getId());
-            response.setCreatedByName(group.getCreatedBy().getName());
-        }
-
-        if (group.getMembers() != null) {
-            List<MemberDTO> memberDTOs = group.getMembers().stream()
-                    .map(MemberDTO::new)
-                    .collect(Collectors.toList());
-            response.setMembers(memberDTOs);
-        }
-
-        return response;
+    public Long getId() {
+        return id;
     }
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public void setId(Long id) {
+        this.id = id;
+    }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public String getName() {
+        return name;
+    }
 
-    public String getMode() { return mode; }
-    public void setMode(String mode) { this.mode = mode; }
+    public void setName(String name) {
+        this.name = name;
+    }
 
-    public Long getCreatedByUserId() { return createdByUserId; }
-    public void setCreatedByUserId(Long createdByUserId) { this.createdByUserId = createdByUserId; }
+    public String getDescription() {
+        return description;
+    }
 
-    public String getCreatedByName() { return createdByName; }
-    public void setCreatedByName(String createdByName) { this.createdByName = createdByName; }
+    public void setDescription(String description) {
+        this.description = description;
+    }
 
-    public List<MemberDTO> getMembers() { return members; }
-    public void setMembers(List<MemberDTO> members) { this.members = members; }
+    public String getMode() {
+        return mode;
+    }
+
+    public void setMode(String mode) {
+        this.mode = mode;
+    }
+
+    public Long getCreatedById() {
+        return createdById;
+    }
+
+    public void setCreatedById(Long createdById) {
+        this.createdById = createdById;
+    }
+
+    public String getCreatedByName() {
+        return createdByName;
+    }
+
+    public void setCreatedByName(String createdByName) {
+        this.createdByName = createdByName;
+    }
+
+    public String getCreatedByEmail() {
+        return createdByEmail;
+    }
+
+    public void setCreatedByEmail(String createdByEmail) {
+        this.createdByEmail = createdByEmail;
+    }
+
+    public Set<User> getMembers() {
+        return members;
+    }
+
+    public void setMembers(Set<User> members) {
+        this.members = members;
+    }
 }

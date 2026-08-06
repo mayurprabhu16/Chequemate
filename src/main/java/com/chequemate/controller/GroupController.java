@@ -1,5 +1,25 @@
 package com.chequemate.controller;
 
+import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.Set;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import com.chequemate.entity.Expense;
 import com.chequemate.entity.ExpenseSplit;
 import com.chequemate.entity.Group;
@@ -7,13 +27,6 @@ import com.chequemate.entity.User;
 import com.chequemate.repository.ExpenseRepository;
 import com.chequemate.repository.GroupRepository;
 import com.chequemate.repository.UserRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
-import java.math.BigDecimal;
-import java.util.*;
 
 @RestController
 @RequestMapping("/api/groups")
@@ -98,28 +111,58 @@ public class GroupController {
     }
 
     @PostMapping("/{groupId}/expenses")
-    public ResponseEntity<?> createGroupExpense(@PathVariable Long groupId, @RequestBody Expense expense) {
+    public ResponseEntity<?> createGroupExpense(@PathVariable Long groupId, @RequestBody Map<String, Object> payload) {
         try {
             Group group = groupRepository.findById(groupId)
                     .orElseThrow(() -> new NoSuchElementException("Group not found with id: " + groupId));
 
+            Expense expense = new Expense();
             expense.setGroup(group);
 
-            if (expense.getSplits() != null && !expense.getSplits().isEmpty()) {
-                for (ExpenseSplit split : expense.getSplits()) {
-                    split.setExpense(expense);
-                    if (split.getAmount() != null) {
-                        split.setAmountOwed(split.getAmount());
+            if (payload.containsKey("description")) {
+                expense.setDescription((String) payload.get("description"));
+            }
+
+            if (payload.containsKey("amount") && payload.get("amount") != null) {
+                expense.setAmount(Double.valueOf(payload.get("amount").toString()));
+                expense.setTotalAmount(new BigDecimal(payload.get("amount").toString()));
+            }
+
+            if (payload.containsKey("splitType")) {
+                expense.setSplitType((String) payload.get("splitType"));
+            } else {
+                expense.setSplitType("EQUAL");
+            }
+
+            if (payload.containsKey("paidBy") && payload.get("paidBy") != null) {
+                Long paidByUserId = null;
+                Object paidByObj = payload.get("paidBy");
+
+                if (paidByObj != null) {
+                    if (paidByObj instanceof Map) {
+                        Object idVal = ((Map<?, ?>) paidByObj).get("id");
+                        if (idVal != null) {
+                            paidByUserId = Long.valueOf(String.valueOf(idVal));
+                        }
+                    } else {
+                        // Safely parse String representation without raw null-dereference
+                        paidByUserId = Long.valueOf(String.valueOf(paidByObj));
                     }
+                }
+
+                if (paidByUserId != null) {
+                    User payer = userRepository.findById(paidByUserId).orElse(null);
+                    expense.setPaidBy(payer);
                 }
             }
 
             Expense savedExpense = expenseRepository.save(expense);
             return ResponseEntity.status(HttpStatus.CREATED).body(savedExpense);
+
         } catch (IllegalArgumentException | NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error adding expense: " + e.getMessage());
         }
     }
 
@@ -135,25 +178,33 @@ public class GroupController {
 
             if (group.getMembers() != null) {
                 for (User member : group.getMembers()) {
-                    balances.put(member.getId(), BigDecimal.ZERO);
+                    if (member != null && member.getId() != null) {
+                        balances.put(member.getId(), BigDecimal.ZERO);
+                    }
                 }
             }
 
             for (Expense expense : expenses) {
-                if (expense.getPaidBy() != null) {
-                    Long payerId = expense.getPaidBy().getId();
-                    BigDecimal total = expense.getTotalAmount() != null ? 
-                            expense.getTotalAmount() : 
-                            (expense.getAmount() != null ? BigDecimal.valueOf(expense.getAmount()) : BigDecimal.ZERO);
+                if (expense != null) {
+                    Optional<User> optionalPayer = Optional.ofNullable(expense.getPaidBy());
+                    if (optionalPayer.isPresent()) {
+                        User payer = optionalPayer.get();
+                        Long payerId = payer.getId();
+                        if (payerId != null) {
+                            BigDecimal total = expense.getTotalAmount() != null ? 
+                                    expense.getTotalAmount() : 
+                                    (expense.getAmount() != null ? BigDecimal.valueOf(expense.getAmount()) : BigDecimal.ZERO);
 
-                    balances.put(payerId, balances.getOrDefault(payerId, BigDecimal.ZERO).add(total));
-                }
+                            balances.put(payerId, balances.getOrDefault(payerId, BigDecimal.ZERO).add(total));
+                        }
+                    }
 
-                if (expense.getSplits() != null) {
-                    for (ExpenseSplit split : expense.getSplits()) {
-                        if (split.getUser() != null && split.getAmountOwed() != null) {
-                            Long debtorId = split.getUser().getId();
-                            balances.put(debtorId, balances.getOrDefault(debtorId, BigDecimal.ZERO).subtract(split.getAmountOwed()));
+                    if (expense.getSplits() != null) {
+                        for (ExpenseSplit split : expense.getSplits()) {
+                            if (split != null && split.getUser() != null && split.getUser().getId() != null && split.getAmountOwed() != null) {
+                                Long debtorId = split.getUser().getId();
+                                balances.put(debtorId, balances.getOrDefault(debtorId, BigDecimal.ZERO).subtract(split.getAmountOwed()));
+                            }
                         }
                     }
                 }
@@ -165,5 +216,10 @@ public class GroupController {
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
+    }
+
+    @Override
+    public String toString() {
+        return "GroupController{}";
     }
 }
