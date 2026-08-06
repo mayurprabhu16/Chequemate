@@ -1,28 +1,5 @@
 package com.chequemate.controller;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.Optional;
-import java.util.Set;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-
 import com.chequemate.entity.Expense;
 import com.chequemate.entity.ExpenseSplit;
 import com.chequemate.entity.Group;
@@ -30,6 +7,15 @@ import com.chequemate.entity.User;
 import com.chequemate.repository.ExpenseRepository;
 import com.chequemate.repository.GroupRepository;
 import com.chequemate.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/groups")
@@ -81,10 +67,8 @@ public class GroupController {
             Group savedGroup = groupRepository.save(group);
             return ResponseEntity.status(HttpStatus.CREATED).body(savedGroup);
         } catch (IllegalArgumentException | NoSuchElementException e) {
-            System.err.println("Invalid request during group creation: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (RuntimeException e) {
-            System.err.println("Error creating group: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
@@ -108,10 +92,8 @@ public class GroupController {
             Group updatedGroup = groupRepository.save(group);
             return ResponseEntity.ok(updatedGroup);
         } catch (IllegalArgumentException | NoSuchElementException e) {
-            System.err.println("Invalid payload for updateGroup: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (RuntimeException e) {
-            System.err.println("Error updating group " + id + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
@@ -149,10 +131,8 @@ public class GroupController {
 
             return ResponseEntity.ok(updatedGroup);
         } catch (IllegalArgumentException | NoSuchElementException | ClassCastException e) {
-            System.err.println("Invalid request format for adding member: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid data format: " + e.getMessage());
         } catch (RuntimeException e) {
-            System.err.println("Error adding member: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error adding member: " + e.getMessage());
         }
     }
@@ -181,10 +161,8 @@ public class GroupController {
 
             return ResponseEntity.ok(updatedGroup);
         } catch (IllegalArgumentException | NoSuchElementException e) {
-            System.err.println("Invalid user or group ID: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (RuntimeException e) {
-            System.err.println("Error adding member to group: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
@@ -222,6 +200,7 @@ public class GroupController {
             String splitType = payload.get("splitType") != null ? String.valueOf(payload.get("splitType")) : "EQUAL";
             expense.setSplitType(splitType);
 
+            // PaidBy User
             Long paidByUserId = null;
             Object paidByObj = payload.get("paidBy");
             if (paidByObj == null) {
@@ -243,7 +222,7 @@ public class GroupController {
             Object splitsObj = payload.get("splits");
             if (splitsObj == null) splitsObj = payload.get("memberSplits");
 
-            if (splitsObj instanceof List<?> splitsList) {
+            if (splitsObj instanceof List<?> splitsList && !splitsList.isEmpty()) {
                 for (Object splitObj : splitsList) {
                     if (splitObj instanceof Map<?, ?> splitMap) {
                         ExpenseSplit split = new ExpenseSplit();
@@ -280,6 +259,20 @@ public class GroupController {
                         }
                     }
                 }
+            } else {
+                // AUTO-SPLIT EQUALLY ACROSS ALL GROUP MEMBERS IF NOT EXPLICITLY PROVIDED
+                Set<User> members = group.getMembers();
+                if (members != null && !members.isEmpty() && amountVal.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal splitPerMember = amountVal.divide(BigDecimal.valueOf(members.size()), 2, RoundingMode.HALF_UP);
+                    for (User member : members) {
+                        ExpenseSplit split = new ExpenseSplit();
+                        split.setExpense(expense);
+                        split.setUser(member);
+                        split.setAmount(splitPerMember);
+                        split.setAmountOwed(splitPerMember);
+                        expenseSplits.add(split);
+                    }
+                }
             }
 
             expense.setSplits(expenseSplits);
@@ -288,14 +281,13 @@ public class GroupController {
             return ResponseEntity.status(HttpStatus.CREATED).body(savedExpense);
 
         } catch (IllegalArgumentException | ClassCastException e) {
-            System.err.println("Invalid arguments processing expense for group " + groupId + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid request data: " + e.getMessage());
         } catch (RuntimeException e) {
-            System.err.println("Server error processing expense for group " + groupId + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error processing expense: " + e.getMessage());
         }
     }
 
+    // DYNAMIC SIMPLIFIED BALANCES ALGORITHM
     @GetMapping("/{groupId}/balances")
     public ResponseEntity<?> getGroupBalances(@PathVariable Long groupId) {
         try {
@@ -307,48 +299,97 @@ public class GroupController {
 
             List<Expense> expenses = expenseRepository.findByGroupId(groupId);
 
-            Map<Long, BigDecimal> balances = new HashMap<>();
+            Map<Long, BigDecimal> netBalances = new HashMap<>();
+            Map<Long, User> userLookup = new HashMap<>();
 
             if (group.getMembers() != null) {
                 for (User member : group.getMembers()) {
                     if (member != null && member.getId() != null) {
-                        balances.put(member.getId(), BigDecimal.ZERO);
+                        netBalances.put(member.getId(), BigDecimal.ZERO);
+                        userLookup.put(member.getId(), member);
                     }
                 }
             }
 
+            // Calculate Net Balance for each member (Paid - Owed)
             for (Expense expense : expenses) {
                 if (expense != null) {
-                    Optional<User> optionalPayer = Optional.ofNullable(expense.getPaidBy());
-                    if (optionalPayer.isPresent()) {
-                        User payer = optionalPayer.get();
-                        Long payerId = payer.getId();
-                        if (payerId != null) {
-                            BigDecimal total = expense.getTotalAmount() != null ? 
-                                    expense.getTotalAmount() : 
-                                    (expense.getAmount() != null ? BigDecimal.valueOf(expense.getAmount()) : BigDecimal.ZERO);
+                    User payer = expense.getPaidBy();
+                    BigDecimal total = expense.getTotalAmount() != null ? 
+                            expense.getTotalAmount() : 
+                            (expense.getAmount() != null ? BigDecimal.valueOf(expense.getAmount()) : BigDecimal.ZERO);
 
-                            balances.put(payerId, balances.getOrDefault(payerId, BigDecimal.ZERO).add(total));
-                        }
+                    if (payer != null && payer.getId() != null) {
+                        Long payerId = payer.getId();
+                        userLookup.putIfAbsent(payerId, payer);
+                        netBalances.put(payerId, netBalances.getOrDefault(payerId, BigDecimal.ZERO).add(total));
                     }
 
                     if (expense.getSplits() != null) {
                         for (ExpenseSplit split : expense.getSplits()) {
-                            if (split != null && split.getUser() != null && split.getUser().getId() != null && split.getAmountOwed() != null) {
+                            if (split != null && split.getUser() != null && split.getUser().getId() != null) {
                                 Long debtorId = split.getUser().getId();
-                                balances.put(debtorId, balances.getOrDefault(debtorId, BigDecimal.ZERO).subtract(split.getAmountOwed()));
+                                userLookup.putIfAbsent(debtorId, split.getUser());
+                                BigDecimal owed = split.getAmountOwed() != null ? split.getAmountOwed() : (split.getAmount() != null ? split.getAmount() : BigDecimal.ZERO);
+                                netBalances.put(debtorId, netBalances.getOrDefault(debtorId, BigDecimal.ZERO).subtract(owed));
                             }
                         }
                     }
                 }
             }
 
-            return ResponseEntity.ok(balances);
+            // Simplify Debts Algorithm (Greedy approach for minimal transactions)
+            PriorityQueue<Map.Entry<Long, BigDecimal>> debtors = new PriorityQueue<>(Comparator.comparing(Map.Entry::getValue));
+            PriorityQueue<Map.Entry<Long, BigDecimal>> creditors = new PriorityQueue<>((a, b) -> b.getValue().compareTo(a.getValue()));
+
+            for (Map.Entry<Long, BigDecimal> entry : netBalances.entrySet()) {
+                if (entry.getValue().compareTo(BigDecimal.valueOf(-0.01)) < 0) {
+                    debtors.add(new AbstractMap.SimpleEntry<>(entry.getKey(), entry.getValue()));
+                } else if (entry.getValue().compareTo(BigDecimal.valueOf(0.01)) > 0) {
+                    creditors.add(new AbstractMap.SimpleEntry<>(entry.getKey(), entry.getValue()));
+                }
+            }
+
+            List<Map<String, Object>> simplifiedDebts = new ArrayList<>();
+
+            while (!debtors.isEmpty() && !creditors.isEmpty()) {
+                Map.Entry<Long, BigDecimal> debtor = debtors.poll();
+                Map.Entry<Long, BigDecimal> creditor = creditors.poll();
+
+                BigDecimal debtorOwes = debtor.getValue().negate();
+                BigDecimal creditorGets = creditor.getValue();
+
+                BigDecimal settledAmount = debtorOwes.min(creditorGets);
+
+                User debtorUser = userLookup.get(debtor.getKey());
+                User creditorUser = userLookup.get(creditor.getKey());
+
+                Map<String, Object> debt = new HashMap<>();
+                debt.put("fromUserId", debtor.getKey());
+                debt.put("fromUserName", debtorUser != null ? debtorUser.getName() : "User " + debtor.getKey());
+                debt.put("toUserId", creditor.getKey());
+                debt.put("toUserName", creditorUser != null ? creditorUser.getName() : "User " + creditor.getKey());
+                debt.put("amount", settledAmount.setScale(2, RoundingMode.HALF_UP));
+
+                simplifiedDebts.add(debt);
+
+                if (debtorOwes.compareTo(settledAmount) > 0) {
+                    debtors.add(new AbstractMap.SimpleEntry<>(debtor.getKey(), settledAmount.subtract(debtorOwes)));
+                }
+
+                if (creditorGets.compareTo(settledAmount) > 0) {
+                    creditors.add(new AbstractMap.SimpleEntry<>(creditor.getKey(), creditorGets.subtract(settledAmount)));
+                }
+            }
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("netBalances", netBalances);
+            response.put("simplifiedDebts", simplifiedDebts);
+
+            return ResponseEntity.ok(response);
         } catch (IllegalArgumentException | NoSuchElementException e) {
-            System.err.println("Invalid request fetching balances for group " + groupId + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (RuntimeException e) {
-            System.err.println("Error calculating balances for group " + groupId + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
         }
     }
