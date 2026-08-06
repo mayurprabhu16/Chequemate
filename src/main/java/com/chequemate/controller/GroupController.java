@@ -18,6 +18,7 @@ import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -118,6 +119,30 @@ public class GroupController {
         } catch (RuntimeException e) {
             System.err.println("Error updating group " + id + ": " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
+    }
+
+    // HANDLES DELETE /api/groups/{id}
+    @DeleteMapping("/{id}")
+    @Transactional
+    public ResponseEntity<?> deleteGroup(@PathVariable Long id) {
+        try {
+            Optional<Group> groupOpt = groupRepository.findById(id);
+            if (groupOpt.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Group not found with id: " + id);
+            }
+
+            List<Expense> expenses = expenseRepository.findByGroupId(id);
+            if (expenses != null && !expenses.isEmpty()) {
+                expenseRepository.deleteAll(expenses);
+            }
+
+            groupRepository.deleteById(id);
+            return ResponseEntity.ok("Group deleted successfully");
+        } catch (Exception e) {
+            System.err.println("Error deleting group " + id + ": " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Error deleting group: " + e.getMessage());
         }
     }
 
@@ -314,7 +339,6 @@ public class GroupController {
         }
     }
 
-    // FIXES 404 ERROR ON DELETE /api/groups/{groupId}/expenses/{expenseId}
     @DeleteMapping("/{groupId}/expenses/{expenseId}")
     public ResponseEntity<?> deleteGroupExpense(@PathVariable Long groupId, @PathVariable Long expenseId) {
         try {
@@ -425,7 +449,7 @@ public class GroupController {
                 simplifiedDebts.add(debt);
 
                 if (debtorOwes.compareTo(settledAmount) > 0) {
-                    debtors.add(new AbstractMap.SimpleEntry<>(debtor.getKey(), settledAmount.subtract(debtorOwes)));
+                    debtors.add(new AbstractMap.SimpleEntry<>(debtor.getKey(), settledAmount.subtract(settledAmount)));
                 }
 
                 if (creditorGets.compareTo(settledAmount) > 0) {
