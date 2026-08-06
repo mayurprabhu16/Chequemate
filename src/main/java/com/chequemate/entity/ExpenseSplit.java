@@ -1,8 +1,19 @@
 package com.chequemate.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import jakarta.persistence.*;
 import java.math.BigDecimal;
+
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "expense_splits")
@@ -14,27 +25,29 @@ public class ExpenseSplit {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "expense_id")
-    @JsonIgnoreProperties("splits")
+    @JsonBackReference
     private Expense expense;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "user_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private User user;
 
     private BigDecimal amount;
+
+    @Column(name = "amount_owed")
     private BigDecimal amountOwed;
+
     private Double percentage;
 
     public ExpenseSplit() {}
 
-    // 1. Constructor matching (User, BigDecimal)
     public ExpenseSplit(User user, BigDecimal amount) {
         this.user = user;
         this.amount = amount;
         this.amountOwed = amount;
     }
 
-    // 2. Constructor matching (Expense, User, BigDecimal)
     public ExpenseSplit(Expense expense, User user, BigDecimal amount) {
         this.expense = expense;
         this.user = user;
@@ -90,5 +103,14 @@ public class ExpenseSplit {
 
     public void setPercentage(Double percentage) {
         this.percentage = percentage;
+    }
+
+    @Override
+    public String toString() {
+        return "ExpenseSplit{" +
+                "id=" + id +
+                ", amount=" + amount +
+                ", amountOwed=" + amountOwed +
+                '}';
     }
 }

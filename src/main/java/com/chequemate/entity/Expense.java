@@ -1,11 +1,25 @@
 package com.chequemate.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.Table;
 
 @Entity
 @Table(name = "expenses")
@@ -16,8 +30,13 @@ public class Expense {
     private Long id;
 
     private String description;
+    
     private Double amount;
+    
+    @Column(name = "total_amount")
     private BigDecimal totalAmount;
+
+    @Column(name = "split_type")
     private String splitType;
 
     @ManyToOne(fetch = FetchType.EAGER)
@@ -26,14 +45,14 @@ public class Expense {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "group_id")
-    @JsonIgnoreProperties("expenses")
+    @JsonIgnoreProperties({"expenses", "members", "hibernateLazyInitializer", "handler"})
     private Group group;
 
+    @Column(name = "created_at")
     private LocalDateTime createdAt;
 
-    // --- FIX: Change List<String> to List<ExpenseSplit> ---
-    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
-    @JoinColumn(name = "expense_id")
+    @OneToMany(mappedBy = "expense", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @JsonManagedReference
     private List<ExpenseSplit> splits = new ArrayList<>();
 
     public Expense() {}
@@ -43,9 +62,13 @@ public class Expense {
         if (this.createdAt == null) {
             this.createdAt = LocalDateTime.now();
         }
+        if (this.splitType == null) {
+            this.splitType = "EQUAL";
+        }
     }
 
-    // Getters and Setters
+    // --- GETTERS & SETTERS ---
+
     public Long getId() {
         return id;
     }
@@ -110,12 +133,22 @@ public class Expense {
         this.createdAt = createdAt;
     }
 
-    // --- FIX: Update Getters & Setters to List<ExpenseSplit> ---
     public List<ExpenseSplit> getSplits() {
         return splits;
     }
 
     public void setSplits(List<ExpenseSplit> splits) {
         this.splits = splits;
+    }
+
+    @Override
+    public String toString() {
+        return "Expense{" +
+                "id=" + id +
+                ", description='" + description + '\'' +
+                ", amount=" + amount +
+                ", totalAmount=" + totalAmount +
+                ", splitType='" + splitType + '\'' +
+                '}';
     }
 }
