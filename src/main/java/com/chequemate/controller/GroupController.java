@@ -51,6 +51,19 @@ public class GroupController {
     @Autowired
     private ExpenseRepository expenseRepository;
 
+    // Helper method to eliminate boxed conversion diagnostics
+    private Long parseUserId(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Number num) {
+            return num.longValue();
+        }
+        try {
+            return Long.valueOf(String.valueOf(obj));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     @GetMapping
     public ResponseEntity<List<Group>> getAllGroups() {
         return ResponseEntity.ok(groupRepository.findAll());
@@ -74,13 +87,13 @@ public class GroupController {
             Long userId = null;
 
             if (payload.get("userId") != null) {
-                userId = Long.valueOf(String.valueOf(payload.get("userId")));
+                userId = parseUserId(payload.get("userId"));
             } else if (payload.get("createdById") != null) {
-                userId = Long.valueOf(String.valueOf(payload.get("createdById")));
+                userId = parseUserId(payload.get("createdById"));
             } else if (payload.get("createdBy") instanceof Map<?, ?> map && map.get("id") != null) {
-                userId = Long.valueOf(String.valueOf(map.get("id")));
+                userId = parseUserId(map.get("id"));
             } else if (payload.get("user") instanceof Map<?, ?> map && map.get("id") != null) {
-                userId = Long.valueOf(String.valueOf(map.get("id")));
+                userId = parseUserId(map.get("id"));
             }
 
             if (userId == null) {
@@ -199,19 +212,51 @@ public class GroupController {
 
             Optional<User> userOpt = Optional.empty();
 
-            if (payload.containsKey("email") && payload.get("email") != null) {
-                String email = String.valueOf(payload.get("email")).trim();
-                userOpt = userRepository.findByEmail(email);
+            String inputVal = null;
+            if (payload.containsKey("userCode") && payload.get("userCode") != null) {
+                inputVal = String.valueOf(payload.get("userCode")).trim();
+            } else if (payload.containsKey("email") && payload.get("email") != null) {
+                inputVal = String.valueOf(payload.get("email")).trim();
             } else if (payload.containsKey("userId") && payload.get("userId") != null) {
-                Long userId = Long.valueOf(String.valueOf(payload.get("userId")));
-                userOpt = userRepository.findById(userId);
-            } else if (payload.containsKey("userCode") && payload.get("userCode") != null) {
-                String code = String.valueOf(payload.get("userCode")).trim();
-                userOpt = userRepository.findByEmail(code); // Fallback lookup if userCode shares repository query
+                inputVal = String.valueOf(payload.get("userId")).trim();
+            }
+
+            if (inputVal == null || inputVal.isEmpty()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Member identification input is required.");
+            }
+
+            // 1. Check for User Code format (e.g. "A00002" -> ID 2)
+            if (inputVal.toUpperCase().startsWith("A") && inputVal.length() > 1) {
+                try {
+                    Long parsedId = parseUserId(inputVal.substring(1));
+                    if (parsedId != null) userOpt = userRepository.findById(parsedId);
+                } catch (NumberFormatException ignored) {}
+            }
+
+            // 2. Check for raw numeric User ID
+            if (userOpt.isEmpty()) {
+                Long parsedId = parseUserId(inputVal);
+                if (parsedId != null) userOpt = userRepository.findById(parsedId);
+            }
+
+            // 3. Search by Email
+            if (userOpt.isEmpty()) {
+                userOpt = userRepository.findByEmail(inputVal);
+            }
+
+            // 4. Fallback search across all users for custom userCode field matching
+            if (userOpt.isEmpty()) {
+                List<User> allUsers = userRepository.findAll();
+                for (User u : allUsers) {
+                    if (u.getUserCode() != null && u.getUserCode().equalsIgnoreCase(inputVal)) {
+                        userOpt = Optional.of(u);
+                        break;
+                    }
+                }
             }
 
             if (userOpt.isEmpty()) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found with code/email: " + inputVal);
             }
 
             User user = userOpt.get();
@@ -271,9 +316,9 @@ public class GroupController {
 
             if (paidByObj instanceof Map<?, ?> map) {
                 Object idVal = map.get("id");
-                if (idVal != null) paidByUserId = Long.valueOf(String.valueOf(idVal));
+                if (idVal != null) paidByUserId = parseUserId(idVal);
             } else if (paidByObj != null) {
-                paidByUserId = Long.valueOf(String.valueOf(paidByObj));
+                paidByUserId = parseUserId(paidByObj);
             }
 
             if (paidByUserId != null) {
@@ -292,13 +337,13 @@ public class GroupController {
 
                         Long splitUserId = null;
                         if (splitMap.get("userId") != null) {
-                            splitUserId = Long.valueOf(String.valueOf(splitMap.get("userId")));
+                            splitUserId = parseUserId(splitMap.get("userId"));
                         } else if (splitMap.get("user") != null) {
                             Object uObj = splitMap.get("user");
                             if (uObj instanceof Map<?, ?> uMap && uMap.get("id") != null) {
-                                splitUserId = Long.valueOf(String.valueOf(uMap.get("id")));
+                                splitUserId = parseUserId(uMap.get("id"));
                             } else if (uObj != null) {
-                                splitUserId = Long.valueOf(String.valueOf(uObj));
+                                splitUserId = parseUserId(uObj);
                             }
                         }
 
