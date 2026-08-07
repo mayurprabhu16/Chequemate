@@ -51,7 +51,7 @@ public class GroupController {
     @Autowired
     private ExpenseRepository expenseRepository;
 
-    // Helper method to eliminate boxed conversion diagnostics
+    // Helper method to prevent boxed primitive conversion warnings
     private Long parseUserId(Object obj) {
         if (obj == null) return null;
         if (obj instanceof Number num) {
@@ -225,7 +225,7 @@ public class GroupController {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Member identification input is required.");
             }
 
-            // 1. Check for User Code format (e.g. "A00002" -> ID 2)
+            // 1. Check for User Code format (e.g., "A00002" -> ID 2)
             if (inputVal.toUpperCase().startsWith("A") && inputVal.length() > 1) {
                 try {
                     Long parsedId = parseUserId(inputVal.substring(1));
@@ -244,7 +244,7 @@ public class GroupController {
                 userOpt = userRepository.findByEmail(inputVal);
             }
 
-            // 4. Fallback search across all users for custom userCode field matching
+            // 4. Fallback search across all users
             if (userOpt.isEmpty()) {
                 List<User> allUsers = userRepository.findAll();
                 for (User u : allUsers) {
@@ -445,7 +445,20 @@ public class GroupController {
                 }
 
                 List<ExpenseSplit> splits = expense.getSplits();
-                if (splits != null && !splits.isEmpty()) {
+                
+                // DYNAMIC RECALCULATION FOR EQUAL SPLITS:
+                // Evaluates equal split debts across current active group members dynamically
+                if ("EQUAL".equalsIgnoreCase(expense.getSplitType()) || splits == null || splits.isEmpty()) {
+                    if (!members.isEmpty()) {
+                        BigDecimal splitPerMember = total.divide(BigDecimal.valueOf(members.size()), 2, RoundingMode.HALF_UP);
+                        for (User member : members) {
+                            if (member != null && member.getId() != null) {
+                                netBalances.put(member.getId(), netBalances.getOrDefault(member.getId(), BigDecimal.ZERO).subtract(splitPerMember));
+                            }
+                        }
+                    }
+                } else {
+                    // Custom splits (EXACT, PERCENTAGE)
                     for (ExpenseSplit split : splits) {
                         if (split != null && split.getUser() != null && split.getUser().getId() != null) {
                             Long debtorId = split.getUser().getId();
@@ -453,13 +466,6 @@ public class GroupController {
                             BigDecimal owed = split.getAmountOwed() != null ? split.getAmountOwed() : 
                                     (split.getAmount() != null ? split.getAmount() : BigDecimal.ZERO);
                             netBalances.put(debtorId, netBalances.getOrDefault(debtorId, BigDecimal.ZERO).subtract(owed));
-                        }
-                    }
-                } else if (!members.isEmpty()) {
-                    BigDecimal splitPerMember = total.divide(BigDecimal.valueOf(members.size()), 2, RoundingMode.HALF_UP);
-                    for (User member : members) {
-                        if (member != null && member.getId() != null) {
-                            netBalances.put(member.getId(), netBalances.getOrDefault(member.getId(), BigDecimal.ZERO).subtract(splitPerMember));
                         }
                     }
                 }
